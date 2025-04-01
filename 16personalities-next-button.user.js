@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         16Personalities - Next Button
+// @name         16Personalities - Enhanced Navigation
 // @namespace    http://tampermonkey.net/
-// @version      0.1.0
-// @description  Adds 'Next' and 'Go to Last Page' buttons to the top of a specific quiz form.
-// @author       Invictus
+// @version      0.2.0
+// @description  Adds 'Next', 'Go to Second-to-Last Page', and 'Go to Last Page' buttons to the top of the 16Personalities test.
+// @author       Invictus (modified by AI)
 // @match        https://www.16personalities.com/free-personality-test
 // @grant        none
 // @run-at       document-idle
@@ -14,9 +14,11 @@
 
     const CHECK_INTERVAL = 500; // How often to check for elements (milliseconds)
     const MAX_CHECKS = 20; // How many times to check before giving up
-    const LAST_PAGE_INTERVAL = 200; // Delay between clicks for 'Go to Last Page' (milliseconds)
+    const AUTO_PAGE_INTERVAL = 200; // Delay between clicks for auto-paging (milliseconds)
+    const SECOND_LAST_PAGE_PERCENTAGE = 80; // Target percentage for the second-to-last page
 
-    let lastPageIntervalId = null; // To store the interval ID for the 'Last Page' function
+    let autoPagingIntervalId = null; // To store the interval ID for auto-paging functions
+    let activeAutoButton = null; // To keep track of which auto-button was clicked
 
     /**
      * Waits for an element to appear in the DOM.
@@ -44,21 +46,39 @@
     }
 
     /**
-     * Re-enables the top buttons and clears the interval.
+      * Finds the percentage display element.
+      * @returns {HTMLElement|null} The percentage element or null if not found.
+      */
+    function getPercentageElement() {
+        return document.querySelector('#progress-wrapper .percentage');
+    }
+
+    /**
+     * Re-enables the top buttons and clears the interval after an auto-paging action.
      * @param {HTMLElement} nextBtn - The top 'Next' button.
+     * @param {HTMLElement} secondLastBtn - The 'Go to Second-to-Last Page' button.
      * @param {HTMLElement} lastBtn - The 'Go to Last Page' button.
      */
-    function finishLastPageAction(nextBtn, lastBtn) {
-        if (lastPageIntervalId) {
-            clearInterval(lastPageIntervalId);
-            lastPageIntervalId = null;
+    function finishAutoPagingAction(nextBtn, secondLastBtn, lastBtn) {
+        if (autoPagingIntervalId) {
+            clearInterval(autoPagingIntervalId);
+            autoPagingIntervalId = null;
         }
+        // Re-enable all buttons
         if (nextBtn) nextBtn.disabled = false;
-        if (lastBtn) {
-            lastBtn.disabled = false;
-            lastBtn.textContent = 'Go to Last Page';
+        if (secondLastBtn) secondLastBtn.disabled = false;
+        if (lastBtn) lastBtn.disabled = false;
+
+        // Reset the text of the button that was active
+        if (activeAutoButton) {
+            if (activeAutoButton === secondLastBtn) {
+                 activeAutoButton.textContent = `Go to ${SECOND_LAST_PAGE_PERCENTAGE}% Page`;
+            } else if (activeAutoButton === lastBtn) {
+                 activeAutoButton.textContent = 'Go to Last Page';
+            }
+             activeAutoButton = null; // Clear the active button tracker
         }
-         console.log("Quiz Enhancer: 'Go to Last Page' action finished or stopped.");
+         console.log("Quiz Enhancer: Auto-paging action finished or stopped.");
     }
 
     /**
@@ -83,90 +103,140 @@
 
         const buttonContainer = document.createElement('div');
         buttonContainer.id = 'tm-top-buttons-container';
-        buttonContainer.style.marginBottom = '20px'; // Add some space below the buttons
+        buttonContainer.style.marginBottom = '20px';
         buttonContainer.style.display = 'flex';
-        buttonContainer.style.gap = '10px'; // Space between buttons
-        buttonContainer.style.justifyContent = 'center'; // Center the buttons
-        buttonContainer.style.flexWrap = 'wrap'; // Allow wrapping on smaller screens
-
+        buttonContainer.style.gap = '10px';
+        buttonContainer.style.justifyContent = 'center';
+        buttonContainer.style.flexWrap = 'wrap';
 
         // --- Create Top "Next" Button ---
         const newNextButton = document.createElement('button');
         newNextButton.textContent = 'Next (Top)';
-        newNextButton.type = 'button'; // Important: Prevent form submission
-        // Copy classes for styling (adjust if necessary)
+        newNextButton.type = 'button';
         originalButton.classList.forEach(cls => newNextButton.classList.add(cls));
-        newNextButton.style.position = 'relative'; // Override potential fixed positioning if copied
-        newNextButton.style.width = 'auto'; // Let button size naturally
-
-
+        newNextButton.style.position = 'relative';
+        newNextButton.style.width = 'auto';
         newNextButton.addEventListener('click', () => {
             const currentOriginalButton = getOriginalButton();
-            if (currentOriginalButton) {
+            if (currentOriginalButton && currentOriginalButton.textContent.trim() === 'Next') {
                 console.log("Quiz Enhancer: Clicking original button via Top Next.");
                 currentOriginalButton.click();
+            } else if (currentOriginalButton) {
+                 console.log("Quiz Enhancer: Top Next clicked, but original button is not 'Next' (likely end).");
             } else {
                 console.warn("Quiz Enhancer: Original button not found when clicking Top Next.");
             }
         });
 
+        // --- Create "Go to Second-to-Last Page" Button ---
+        const newSecondLastButton = document.createElement('button');
+        newSecondLastButton.textContent = `Go to ${SECOND_LAST_PAGE_PERCENTAGE}% Page`;
+        newSecondLastButton.type = 'button';
+        originalButton.classList.forEach(cls => newSecondLastButton.classList.add(cls));
+        newSecondLastButton.style.position = 'relative';
+        newSecondLastButton.style.width = 'auto';
+        // Optional styling:
+        // newSecondLastButton.style.backgroundColor = '#6a5acd'; // Slate Blue
+
+        newSecondLastButton.addEventListener('click', () => {
+            if (autoPagingIntervalId) return; // Another auto-page action is already running
+
+            console.log(`Quiz Enhancer: Starting 'Go to ${SECOND_LAST_PAGE_PERCENTAGE}% Page'...`);
+            activeAutoButton = newSecondLastButton; // Mark this as the active button
+            newNextButton.disabled = true;
+            newSecondLastButton.disabled = true;
+            newLastButton.disabled = true; // Disable other buttons too
+            newSecondLastButton.textContent = `Going to ${SECOND_LAST_PAGE_PERCENTAGE}%...`;
+
+            autoPagingIntervalId = setInterval(() => {
+                const currentOriginalButton = getOriginalButton();
+                const percentageElement = getPercentageElement();
+
+                if (!currentOriginalButton || !percentageElement) {
+                    console.warn("Quiz Enhancer: Original button or percentage element disappeared. Stopping.");
+                    finishAutoPagingAction(newNextButton, newSecondLastButton, newLastButton);
+                    return;
+                }
+
+                // Check percentage first
+                const percentageText = percentageElement.textContent.trim();
+                const currentPercentage = parseInt(percentageText.replace('%', ''), 10);
+
+                if (!isNaN(currentPercentage) && currentPercentage >= SECOND_LAST_PAGE_PERCENTAGE) {
+                    console.log(`Quiz Enhancer: Reached or passed ${SECOND_LAST_PAGE_PERCENTAGE}%. Stopping.`);
+                    finishAutoPagingAction(newNextButton, newSecondLastButton, newLastButton);
+                    return;
+                }
+
+                // Check button text if percentage condition not met
+                const buttonText = currentOriginalButton.textContent.trim();
+                if (buttonText === 'Next') {
+                    console.log(`Quiz Enhancer: Clicking Next (auto for ${SECOND_LAST_PAGE_PERCENTAGE}%)...`);
+                    currentOriginalButton.click();
+                } else {
+                    // Button changed to something else (like 'See results' or an error state)
+                     console.warn(`Quiz Enhancer: Original button text is "${buttonText}" before reaching ${SECOND_LAST_PAGE_PERCENTAGE}%. Stopping.`);
+                     finishAutoPagingAction(newNextButton, newSecondLastButton, newLastButton);
+                }
+
+            }, AUTO_PAGE_INTERVAL);
+        });
+
+
         // --- Create "Go to Last Page" Button ---
         const newLastButton = document.createElement('button');
         newLastButton.textContent = 'Go to Last Page';
-        newLastButton.type = 'button'; // Important: Prevent form submission
-        // Copy classes for styling (adjust if necessary)
+        newLastButton.type = 'button';
         originalButton.classList.forEach(cls => newLastButton.classList.add(cls));
-         newLastButton.style.position = 'relative'; // Override potential fixed positioning
-         newLastButton.style.width = 'auto'; // Let button size naturally
-        // Optional: Make it visually distinct
-        // newLastButton.style.backgroundColor = '#5a4e9a'; // Slightly different purple
-
+         newLastButton.style.position = 'relative';
+         newLastButton.style.width = 'auto';
+        // Optional styling:
+        // newLastButton.style.backgroundColor = '#5a4e9a';
 
         newLastButton.addEventListener('click', () => {
-            if (lastPageIntervalId) return; // Already running
+            if (autoPagingIntervalId) return; // Another auto-page action is already running
 
             console.log("Quiz Enhancer: Starting 'Go to Last Page'...");
+            activeAutoButton = newLastButton; // Mark this as the active button
+            newNextButton.disabled = true;
+            newSecondLastButton.disabled = true; // Disable other buttons too
             newLastButton.disabled = true;
-            newNextButton.disabled = true; // Disable next button too
             newLastButton.textContent = 'Going to last...';
 
-            lastPageIntervalId = setInterval(() => {
+            autoPagingIntervalId = setInterval(() => {
                 const currentOriginalButton = getOriginalButton();
 
                 if (!currentOriginalButton) {
                     console.warn("Quiz Enhancer: Original button disappeared during 'Go to Last Page'. Stopping.");
-                    finishLastPageAction(newNextButton, newLastButton);
+                    finishAutoPagingAction(newNextButton, newSecondLastButton, newLastButton);
                     return;
                 }
 
-                // Check button text to see if it's the last page
                 const buttonText = currentOriginalButton.textContent.trim();
                 if (buttonText === 'See results') {
                     console.log("Quiz Enhancer: Reached 'See results' button.");
-                    finishLastPageAction(newNextButton, newLastButton);
+                    finishAutoPagingAction(newNextButton, newSecondLastButton, newLastButton);
                 } else if (buttonText === 'Next') {
-                    // Only click if it's still a 'Next' button
-                     console.log("Quiz Enhancer: Clicking Next (auto)...");
+                     console.log("Quiz Enhancer: Clicking Next (auto for Last Page)...");
                     currentOriginalButton.click();
                 } else {
-                    // Button changed to something unexpected
                      console.warn(`Quiz Enhancer: Original button text is now "${buttonText}". Stopping.`);
-                     finishLastPageAction(newNextButton, newLastButton);
+                     finishAutoPagingAction(newNextButton, newSecondLastButton, newLastButton);
                 }
 
-            }, LAST_PAGE_INTERVAL);
+            }, AUTO_PAGE_INTERVAL);
         });
 
         // --- Add buttons to container and container to form ---
         buttonContainer.appendChild(newNextButton);
+        buttonContainer.appendChild(newSecondLastButton); // Add the new button here
         buttonContainer.appendChild(newLastButton);
-        form.prepend(buttonContainer); // Add the container at the beginning of the form
+        form.prepend(buttonContainer);
 
         console.log("Quiz Enhancer: Top buttons added successfully.");
     }
 
     // --- Start the process ---
-    // Wait for the original button to exist before adding the new ones
     waitForElement('form[data-quiz] .action-row button', addTopButtons);
 
 })();
